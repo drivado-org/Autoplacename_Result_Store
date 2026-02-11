@@ -1,15 +1,19 @@
-FROM alpine:latest
-RUN apk add nodejs npm
+# FROM alpine:latest
+# RUN apk add nodejs npm
 
-COPY package.json package.json
-COPY package-lock.json package-lock.json
-COPY . .
+FROM node:20-alpine
 
+
+COPY package*.json ./ 
 RUN npm install
 
-# ENTRYPOINT ["node", "index.js"]
 
-CMD ["nodemon", "index"]
+COPY . .
+
+
+ENTRYPOINT ["node", "index.js"]
+
+# CMD ["nodemon", "index"]
 
 
 
