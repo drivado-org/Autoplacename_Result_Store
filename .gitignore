@@ -2,6 +2,8 @@
 # /docker-compose.yml
 # /sample_data.json
 /node_modules
+/.env
+
 
 
 
