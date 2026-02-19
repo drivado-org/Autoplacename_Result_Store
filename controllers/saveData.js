@@ -1,43 +1,59 @@
 const { backupData, clickValue, countValue } = require("../models/schema");
-
+const {z}= require("zod")
 const { TOPICS } = require("../kafka/topics");
 
+const backupDataValid = z.object({
+      searchQuery: z.string(),
+      timestamp: z.string(),
+      place: z.object(),
+      source: z.string()
+})
 
+const clickResultValid = z.object({
+      searchQuery: z.string(),
+      timestamp: z.string(),
+      placeId: z.string()
+})
 
 async function saveData(topic, messages) {
   if (topic == TOPICS.CLICKED_VALUE) {
-    await clickValue.create({
-     searchQuery: messages.searchQuery,  
-     placeId: messages.place.placeId,  
-     timestamp: messages.timestamp
-    
-
-    }
-    );
-    const count =  countValue.findOne({placeId: messages.place.placeId})
-    const q = await count.exec()
-    console.log(q)
-    if(q == null){
-      await countValue.create({
-        placeId: messages.place.placeId,
-        count: 1,
+    const result = clickResultValid.safeParse(messages)
+    if(!result.success){
+      console.log(result.error)
+    } else {
+      await clickValue.create({
+        searchQuery: messages.searchQuery,  
+        placeId: messages.placeId,  
         timestamp: messages.timestamp
-    })}
-    else {
-
-      await countValue.updateOne({placeId: messages.place.placeId},{$inc: {count: 1}})
-
+     });
+    
+     const valueExists =  countValue.findOne({placeId: messages.placeId})
+     const record = await valueExists.exec()
+     console.log(record)
+     if(record == null){
+      await countValue.create({
+        placeId: messages.placeId,
+        count: 1
+       })
+     } else {
+      await countValue.updateOne({placeId: messages.placeId},{$inc: {count: 1}})
+     }
+     console.log("Saved click data to MongoDB", messages);
     }
-    console.log("Saved click data to MongoDB", messages);
   } else if (topic == TOPICS.BACKUP_DATA) {
-    await backupData.create({
+    const result = backupDataValid.safeParse(messages)
+    if(!result.success){
+      console.log(result.error)
+    } else {
+      await backupData.create({
       searchQuery: messages.searchQuery,    
       timestamp: messages.timestamp,
       place: messages.place,
       source: messages.source,
-    });
+     });
 
-    console.log("Saved backup data to MongoDB");
+     console.log("Saved backup data to MongoDB");
+    }
   }
 }
 
