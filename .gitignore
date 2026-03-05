@@ -3,6 +3,7 @@
 # /sample_data.json
 /node_modules
 /.env
+/docker-compose.yml
 
 
 
