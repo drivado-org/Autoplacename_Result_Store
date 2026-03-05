@@ -42,7 +42,7 @@ module.exports.kafka =
         },
       })
     : new Kafka({
-        clientId: "drivado-api",
+        clientId: "drivado-api-test",
         brokers: process?.env?.KAFKA_BROKERS?.split(","),
         ssl: false,
         // ssl: {
