@@ -1,110 +1,164 @@
-const { backupData, clickValue, countValue, orsData } = require("../models/schema");
-const {z}= require("zod")
-const { TOPICS } = require("../kafka/topics");
+import "dotenv/config";
+import { pgdb } from "../connections.js";
+import { sql } from "drizzle-orm";
+import {
+  externalDataTable,
+  clickResultTable,
+  placeCountTable,
+  routeCountTable,
+  orsDataTable,
+} from "../models/orm_schema.js";
 
-const backupDataValid = z.object({
-      placeId: z.string(),
-      timestamp: z.string(),
-      lat: z.float32(),
-      lng: z.float32(),
-      
-      postcode: z.string(),
-      address: z.string(),
-      source: z.string()
-})
+import { KAFKA_CONSUMERS } from "../kafka/topics.js";
 
-const clickResultValid = z.object({
-      searchQuery: z.string(),
-      timestamp: z.string(),
-      placeId: z.string()
-})
+import {
+  externalSchema,
+  clickSchema,
+  orsSchema
+} from "../validation/validate.js"
 
-async function saveData(topic, messages) {
-  if (topic == TOPICS.CLICKED_VALUE) {
-    const result = clickResultValid.safeParse(messages)
-    if(!result.success){
-      console.log(result.error)
-    } else {
-      console.log("Saved click data to MongoDB", messages);
-      await clickValue.create({
-        searchQuery: messages.searchQuery,  
-        placeId: messages.placeId,  
-        timestamp: messages.timestamp
-     });
-    //  console.log("Saved click data to MongoDB", messages);
-     const valueExists =  countValue.findOne({placeId: messages.placeId})
-     const record = await valueExists.exec()
-     console.log(record)
-     if(record == null){
-      await countValue.create({
-        placeId: messages.placeId,
-        count: 1
-       })
-     } else {
-      await countValue.updateOne({placeId: messages.placeId},{$inc: {count: 1}})
-     }
-    //  console.log("Saved click data to MongoDB", messages);
-    }
-  } else if (topic == TOPICS.BACKUP_DATA) {
-    const result = backupDataValid.safeParse(messages)
-    if(!result.success){
-      console.log(result.error)
-    } else {
-      // console.log("Backup Data Received")
-      await backupData.create({
-      placeId: messages.placeId,
-      timestamp: messages.timestamp,
-      lat: messages.lat,
-      lng: messages.lng,
-      placenameEN: messages.placenameEN,
-      placenameAR: messages.placenameAR,
-      placenameES: messages.placenameES,
-      type:messages.type,
-      iata:messages.iata,
-      postcode: messages.postcode,
-      address: messages.address,
-      source: messages.source
-     });
+async function updatePlaceCount(savedPlace) {
+  try {
+      await pgdb
+        .insert(placeCountTable)
+        .values({
+          placeId: savedPlace["placeId"],
+          timestamp: savedPlace["insertedAt"],
+          count: 1,
+        })
+        .onConflictDoUpdate({ target: placeCountTable.placeId, targetWhere: sql`${placeCountTable.placeId} = ${savedPlace}`, set: { count: sql`${placeCountTable.count}+ 1` } });
+    
+    console.log("Saved count value to Postgres successfully!");
+  } catch (error) {
+    console.log(
+      "\n\bERROR: There was a problem while sending the count value to Postgres, check the message below ",
+    );
+    console.log(error);
+  }
+  
+}
 
+async function updateRouteCount(savedRoute) {
+  try {
+      await pgdb
+        .insert(routeCountTable)
+        .values({
+          route_id: savedRoute["route_id"],
+          timestamp: savedRoute["timestamp"],
+          count: 1,
+        })
+        .onConflictDoUpdate({ target: routeCountTable.route_id, targetWhere: sql`${routeCountTable.route_id} = ${savedRoute}`, set: { count: sql`${routeCountTable.count}+ 1` } });
+    
+    console.log("Saved route count value to Postgres successfully!");
+  } catch (error) {
+    console.log(
+      "\n\bERROR: There was a problem while sending the route count value to Postgres, check the message below ",
+    );
+    console.log(error);
+  }
+  
+}
 
-     console.log("Saved backup data to MongoDB");
-    }
-  } else if (topic == TOPICS.ORS_RESPONSE){
-      await orsData.create({
-        sourceLat: messages.sourceLat,
-        sourceLng: messages.sourceLng,
-        destinationLat: messages.destinationLat,
-        destinationLng: messages.destinationLng,
-        distance:messages.destination,
-        duration:messages.duration,
-     });
+async function flushORSBuffer(orsMessage) {
+  if (orsMessage["distance_km"] || orsMessage["duration_min"] != null) {
+      orsMessage = {
+        ...orsMessage,
+        route_id:
+          "Drv_" +
+          (
+            Math.abs(
+              (Number(orsMessage["from_lng"]) +
+                Number(orsMessage["from_lat"]) +
+                Number(orsMessage["distance_km"])) *
+                10000,
+            ).toFixed(0) +
+              Math.abs(
+                (Number(orsMessage["to_lng"]) +
+                  Number(orsMessage["to_lat"]) +
+                  Number(orsMessage["duration_min"])) *
+                  10000,
+              ).toFixed(0)
+          )
+      };
+  } else {
+    orsMessage = { ...orsMessage, route_id: "Drv_" + "null_" + (
+          Math.abs(
+            (Number(orsMessage["from_lng"]) +
+              Number(orsMessage["from_lat"])) *
+              10000,
+          ).toFixed(0) +
+            Math.abs(
+              (Number(orsMessage["to_lng"]) +
+                Number(orsMessage["to_lat"])) *
+                10000,
+            ).toFixed(0)
+        ) };
+  }
+  console.log(orsMessage);
+  updateRouteCount(orsMessage);
 
-     console.log("Saved ors response to MongoDB")
-
+  try {
+    await pgdb.insert(orsDataTable).values(orsMessage)
+    console.log("Sent the ORS data to PostgreSQL!");
+  } catch (error) {
+    console.log(
+     "\n\bERROR: There was a problem while sending the ORS data to PostgreSQL, check the message below",
+    );
+    console.log(error);
+   
   }
 }
 
-module.exports = { saveData };
+async function flushExternalBuffer(extMessage) {
+  try {
+    await pgdb.insert(externalDataTable).values(extMessage)
+    console.log("Saved the external location details to PostgreSQL");
+  } catch (error) {
+    console.log(
+      "\n\bERROR: There was a problem while sending the external data to PostgreSQL, check the message below",
+    );
+    console.log(error);
+  }
+}
 
+async function flushClickBuffer(clickMessage) {
+  const insertedAt = Date.now().toString();
+  let updatedClickMessage = {...clickMessage, insertedAt:insertedAt}
+  updatePlaceCount(updatedClickMessage);
+  try {
+    await pgdb.insert(clickResultTable).values(updatedClickMessage)
+    console.log("Saved the clicked location details to PostgreSQL");
+  } catch (error) {
+    console.log(
+      "\n\bERROR: There was a problem while sending the clicked option data to PostgreSQL, check the message below",
+    );
+    console.log(error);
+  }
+}
 
+async function saveData(topic, messages) {
+  if (topic == KAFKA_CONSUMERS[0]['TOPIC']) {
+    const result = clickSchema.safeParse(messages);
+    if (!result.success) {
+      console.log(result.error);
+    } else {
+      flushClickBuffer(messages);
+    }
+  } else if (topic == KAFKA_CONSUMERS[1]['TOPIC']) {
+    const result = externalSchema.safeParse(messages);
+    if (!result.success) {
+      console.log(result.error);
+    } else {
+      flushExternalBuffer(messages);
+    }
+  } else if (topic == KAFKA_CONSUMERS[2]['TOPIC']) {
+    const result = orsSchema.safeParse(messages);
+    if(!result.success){
+      console.log(result.error);
+    } else {
+      flushORSBuffer(messages);
+    }
+  }
+}
 
-
-
-
-    //  await clickValue.create({
-    //     searchQuery: messages.searchQuery,  
-    //     placeId: messages.placeId,  
-    //     timestamp: messages.timestamp
-    //  })
-     
-    //  const valueExists =  countValue.findOne({placeId: messages.placeId})
-    //  const record = await valueExists.exec()
-    //  console.log(record)
-    //  if(record == null){
-    //   await countValue.create({
-    //     placeId: messages.placeId,
-    //     count: 1
-    //    })
-    //  } else {
-    //   await countValue.updateOne({placeId: messages.placeId},{$inc: {count: 1}})
-    //  }
+export { saveData };
