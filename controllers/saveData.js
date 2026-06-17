@@ -1,6 +1,7 @@
 import "dotenv/config";
 import { pgdb } from "../connections.js";
 import { sql } from "drizzle-orm";
+import crypto from 'crypto';
 import {
   externalDataTable,
   clickResultTable,
@@ -60,9 +61,11 @@ async function updateRouteCount(savedRoute) {
 }
 
 async function flushORSBuffer(orsMessage) {
+  const date = new Date()
   if (orsMessage["distance_km"] || orsMessage["duration_min"] != null) {
       orsMessage = {
         ...orsMessage,
+        timestamp: date.toISOString(),
         route_id:
           "Drv_" +
           (
@@ -78,10 +81,11 @@ async function flushORSBuffer(orsMessage) {
                   Number(orsMessage["duration_min"])) *
                   10000,
               ).toFixed(0)
-          )
+          ),
+          serial_id: crypto.randomUUID()
       };
-  } else {
-    orsMessage = { ...orsMessage, route_id: "Drv_" + "null_" + (
+  } else{
+    orsMessage = { ...orsMessage, serial_id: crypto.randomUUID(), error: orsMessage["error"],  reason: orsMessage["reason"], timestamp: date.toISOString(), route_id: "Drv_" + "null_" + (
           Math.abs(
             (Number(orsMessage["from_lng"]) +
               Number(orsMessage["from_lat"])) *
@@ -92,7 +96,8 @@ async function flushORSBuffer(orsMessage) {
                 Number(orsMessage["to_lat"])) *
                 10000,
             ).toFixed(0)
-        ) };
+        ),
+    };
   }
   console.log(orsMessage);
   updateRouteCount(orsMessage);
@@ -123,7 +128,7 @@ async function flushExternalBuffer(extMessage) {
 
 async function flushClickBuffer(clickMessage) {
   const insertedAt = Date.now().toString();
-  let updatedClickMessage = {...clickMessage, insertedAt:insertedAt}
+  let updatedClickMessage = {...clickMessage, insertedAt:insertedAt, serialID: crypto.randomUUID()}
   updatePlaceCount(updatedClickMessage);
   try {
     await pgdb.insert(clickResultTable).values(updatedClickMessage)
