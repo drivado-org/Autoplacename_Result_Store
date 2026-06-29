@@ -82,8 +82,8 @@ async function flushORSBuffer(orsMessage) {
           ),
           serial_id: crypto.randomUUID()
       };
-  } else {
-    orsMessage = { ...orsMessage, route_id: "Drv_" + "null_" + (
+  } else{
+    orsMessage = { ...orsMessage, serial_id: crypto.randomUUID(), error: orsMessage["error"],  reason: orsMessage["reason"], route_id: "Drv_" + "null_" + (
           Math.abs(
             (Number(orsMessage["from_lng"]) +
               Number(orsMessage["from_lat"])) *
@@ -95,7 +95,7 @@ async function flushORSBuffer(orsMessage) {
                 10000,
             ).toFixed(0)
         ),
-      serial_id: crypto.randomUUID() };
+    };
   }
   console.log(orsMessage);
   updateRouteCount(orsMessage);
@@ -126,7 +126,7 @@ async function flushExternalBuffer(extMessage) {
 
 async function flushClickBuffer(clickMessage) {
   const insertedAt = Date.now().toString();
-  let updatedClickMessage = {...clickMessage, insertedAt:insertedAt, serialID: crypto.randomUUID()}
+  let updatedClickMessage = {...clickMessage, insertedAt:insertedAt, serialId: crypto.randomUUID()}
   updatePlaceCount(updatedClickMessage);
   try {
     await pgdb.insert(clickResultTable).values(updatedClickMessage)
@@ -155,6 +155,9 @@ async function saveData(topic, messages) {
       flushExternalBuffer(messages);
     }
   } else if (topic == KAFKA_CONSUMERS[2]['TOPIC']) {
+    let date = new Date(messages["timestamp"])
+    date = date.toISOString()
+    messages["timestamp"] = date
     const result = orsSchema.safeParse(messages);
     if(!result.success){
       console.log(result.error);
