@@ -128,7 +128,7 @@ async function flushExternalBuffer(extMessage) {
 
 async function flushClickBuffer(clickMessage) {
   const insertedAt = Date.now().toString();
-  let updatedClickMessage = {...clickMessage, insertedAt:insertedAt, serialID: crypto.randomUUID()}
+  let updatedClickMessage = {...clickMessage, insertedAt:insertedAt, serialId: crypto.randomUUID()}
   updatePlaceCount(updatedClickMessage);
   try {
     await pgdb.insert(clickResultTable).values(updatedClickMessage)
@@ -157,6 +157,9 @@ async function saveData(topic, messages) {
       flushExternalBuffer(messages);
     }
   } else if (topic == KAFKA_CONSUMERS[2]['TOPIC']) {
+    let date = new Date(messages["timestamp"])
+    date = date.toISOString()
+    messages["timestamp"] = date
     const result = orsSchema.safeParse(messages);
     if(!result.success){
       console.log(result.error);
